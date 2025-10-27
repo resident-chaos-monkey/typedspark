@@ -59,7 +59,16 @@ class Column(SparkColumn, Generic[T]):
         elif alias is not None:
             column = col(f"{alias}.{name}")
         elif parent is not None:
-            column = parent[name]
+            # If parent is a Column (struct field access), use col() to avoid parent[name]
+            # If parent is a DataFrame, use parent[name] as usual
+            if isinstance(parent, Column):
+                # For struct field access, we need to construct the full path
+                if hasattr(parent, 'full_path'):
+                    column = col(f"{parent.full_path}.{name}")
+                else:
+                    column = col(f"{parent.str}.{name}")
+            else:
+                column = parent[name]
         else:
             column = col(name)
 
@@ -100,7 +109,8 @@ class Column(SparkColumn, Generic[T]):
             class Actions(Schema):
                 consequences: Column[StructType[Values]]
 
-        `Actions.consequences.dtype.schema.severity.full_path` will yield the name
+        Both `Actions.consequences.dtype.schema.severity.full_path` and
+        `Actions.consequences.severity.full_path` will yield the name
         of the field `severity` including the full path: `consequences.severity`
 
         """
@@ -120,6 +130,47 @@ class Column(SparkColumn, Generic[T]):
             )  # type: ignore
 
         return dtype()  # type: ignore
+
+    def __getattr__(self, name: str) -> "Column":
+        """Allow direct access to nested schema fields without .dtype.schema.
+
+        This enables accessing nested fields directly, e.g.:
+            Actions.consequences.severity
+        instead of:
+            Actions.consequences.dtype.schema.severity
+        """
+        # Only handle attribute access for StructType columns
+        # and only if the attribute doesn't already exist on Column/SparkColumn
+        if (hasattr(self, '_dtype') and
+            get_origin(self._dtype) == StructType and
+            not hasattr(SparkColumn, name)):
+            # Get the schema class from the StructType generic
+            schema_class = get_args(self._dtype)[0]
+
+            # Check if the schema has this attribute using get_type_hints
+            from typing import get_type_hints
+            try:
+                type_hints = get_type_hints(schema_class)
+                if name in type_hints:
+                    # Get the dtype for the nested field
+                    nested_dtype = schema_class._get_dtype(name)
+
+                    # Create a new column using the same pattern as MetaSchema.__getattribute__
+                    # This avoids the parent[name] syntax issue by mimicking how .dtype.schema.field works
+                    return Column(
+                        name,
+                        dtype=nested_dtype,
+                        parent=self,
+                        curid=getattr(self, '_curid', None),
+                        alias=getattr(self, '_alias', None),
+                    )
+            except (AttributeError, TypeError):
+                # If schema_class doesn't have _get_dtype or get_type_hints fails
+                # TODO: log this error?
+                pass
+
+        # If not a nested field access, raise AttributeError as usual
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
     def __repr__(self) -> str:
         spark = SparkSession.getActiveSession()
