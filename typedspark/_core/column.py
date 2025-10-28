@@ -1,7 +1,7 @@
 """Module containing classes and functions related to TypedSpark Columns."""
 
 from logging import warn
-from typing import Generic, Optional, TypeVar, Union, get_args, get_origin
+from typing import Generic, Optional, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from pyspark.sql import Column as SparkColumn
 from pyspark.sql import DataFrame, SparkSession
@@ -141,36 +141,42 @@ class Column(SparkColumn, Generic[T]):
         """
         # Only handle attribute access for StructType columns
         # and only if the attribute doesn't already exist on Column/SparkColumn
-        if (hasattr(self, '_dtype') and
-            get_origin(self._dtype) == StructType and
-            not hasattr(SparkColumn, name)):
+        if (
+            hasattr(self, "_dtype")
+            and get_origin(self._dtype) == StructType
+            and not hasattr(SparkColumn, name)
+        ):
             # Get the schema class from the StructType generic
             schema_class = get_args(self._dtype)[0]
 
             # Check if the schema has this attribute using get_type_hints
-            from typing import get_type_hints
             try:
                 type_hints = get_type_hints(schema_class)
-                if name in type_hints:
-                    # Get the dtype for the nested field
-                    nested_dtype = schema_class._get_dtype(name)
-
-                    # Create a new column using the same pattern as MetaSchema.__getattribute__
-                    # This avoids the parent[name] syntax issue by mimicking how .dtype.schema.field works
-                    return Column(
-                        name,
-                        dtype=nested_dtype,
-                        parent=self,
-                        curid=getattr(self, '_curid', None),
-                        alias=getattr(self, '_alias', None),
-                    )
-            except (AttributeError, TypeError):
-                # If schema_class doesn't have _get_dtype or get_type_hints fails
-                # TODO: log this error?
+            except (NameError, AttributeError):
+                # Forward references or missing annotations - can't introspect
                 pass
+            else:
+                # Only proceed if name exists in type hints
+                if name in type_hints:
+                    try:
+                        nested_dtype = schema_class._get_dtype(name)
+                    except AttributeError:
+                        # Schema doesn't implement _get_dtype - skip nested field creation
+                        pass
+                    else:
+                        # Successfully got dtype, create the nested column
+                        return Column(
+                            name,
+                            dtype=nested_dtype,
+                            parent=self,
+                            curid=getattr(self, "_curid", None),
+                            alias=getattr(self, "_alias", None),
+                        )
 
         # If not a nested field access, raise AttributeError as usual
-        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+        raise AttributeError(
+            f"'{self.__class__.__name__}' object has no attribute '{name}'"
+        )
 
     def __repr__(self) -> str:
         spark = SparkSession.getActiveSession()
