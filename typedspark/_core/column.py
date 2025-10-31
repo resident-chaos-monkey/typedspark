@@ -43,7 +43,7 @@ class Column(SparkColumn, Generic[T]):
 
         Here, we simply take the provided ``name``, create a pyspark
         ``Column`` object and cast it to a typedspark ``Column`` object.
-        This allows us to bypass the pypsark ``Column`` constuctor in
+        This allows us to bypass the pyspark ``Column`` constructor in
         ``__init__()``, which requires parameters that may be difficult
         to access.
         """
@@ -177,6 +177,34 @@ class Column(SparkColumn, Generic[T]):
         raise AttributeError(
             f"'{self.__class__.__name__}' object has no attribute '{name}'"
         )
+
+    def __dir__(self):
+        """Provide autocomplete suggestions including nested struct fields."""
+        # Start with the default attributes from the class hierarchy
+        default_attrs = set(dir(type(self)))
+
+        # Add nested struct fields if this is a StructType column
+        if (
+            hasattr(self, "_dtype")
+            and get_origin(self._dtype) == StructType
+        ):
+            try:
+                schema_class = get_args(self._dtype)[0]
+                type_hints = get_type_hints(schema_class)
+
+                # Add field names that don't conflict with existing methods
+                safe_fields = {
+                    field for field in type_hints.keys()
+                    if not hasattr(SparkColumn, field)
+                }
+
+                default_attrs.update(safe_fields)
+
+            except (NameError, AttributeError, TypeError):
+                # Gracefully handle cases where type hints can't be resolved
+                pass
+
+        return sorted(default_attrs)
 
     def __repr__(self) -> str:
         spark = SparkSession.getActiveSession()

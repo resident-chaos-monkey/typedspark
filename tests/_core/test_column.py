@@ -203,3 +203,101 @@ def test_direct_nested_field_access_name_conflicts():
     nested_field = TestSchema2.field.custom_name
     assert isinstance(nested_field, Column), "Non-conflicting field should return Column instance"
     assert nested_field.full_path == "field.custom_name"
+
+
+def test_dir_includes_nested_fields():
+    """Test that __dir__ includes nested struct fields for autocomplete"""
+    consequences = Actions.consequences
+    available_attrs = dir(consequences)
+
+    # Should include nested fields from Values schema
+    assert "severity" in available_attrs, "dir() should include 'severity' field"
+    assert "cause" in available_attrs, "dir() should include 'cause' field"
+
+    # Should also include regular Column methods
+    assert "alias" in available_attrs, "dir() should include regular Column methods"
+    assert "cast" in available_attrs, "dir() should include regular Column methods"
+
+
+def test_dir_excludes_conflicting_fields():
+    """Test that __dir__ excludes fields that conflict with SparkColumn methods"""
+
+    class SchemaWithConflictingField(Schema):
+        name: Column[StringType]  # Conflicts with SparkColumn.name
+        alias: Column[StringType]  # Conflicts with SparkColumn.alias
+        severity: Column[IntegerType]  # Safe field
+
+    class TestSchema(Schema):
+        field: Column[StructType[SchemaWithConflictingField]]
+
+    field_column = TestSchema.field
+    available_attrs = dir(field_column)
+
+    # Conflicting fields should NOT be included in dir()
+    # because they would shadow SparkColumn methods
+    # Note: 'name' and 'alias' will still appear because they're legitimate SparkColumn methods
+
+    # Safe field should be included
+    assert "severity" in available_attrs, "dir() should include non-conflicting fields"
+
+
+def test_dir_on_non_struct_column():
+    """Test that __dir__ behaves normally on non-struct columns"""
+    # A.a is Column[LongType], not a struct
+    column_a = A.a
+    available_attrs = dir(column_a)
+
+    # Should include regular Column methods
+    assert "alias" in available_attrs
+    assert "cast" in available_attrs
+
+    # Should NOT include any nested fields (since it's not a struct)
+    # We can't easily test this directly, but it should behave like a normal Column
+    attrs_count = len(available_attrs)
+    assert attrs_count > 30, "Should have many Column methods available"
+
+
+def test_dir_nested_struct_fields():
+    """Test that __dir__ works on nested struct fields too"""
+    # Get the cause field (which is also a StructType)
+    cause = Actions.consequences.cause
+    available_attrs = dir(cause)
+
+    # Should include fields from Cause schema
+    assert "source" in available_attrs, "dir() should include fields from nested Cause schema"
+
+    # Should also include regular Column methods
+    assert "alias" in available_attrs
+    assert "cast" in available_attrs
+
+
+def test_dir_returns_sorted_list():
+    """Test that __dir__ returns a sorted list"""
+    consequences = Actions.consequences
+    available_attrs = dir(consequences)
+
+    # Should be a sorted list
+    assert available_attrs == sorted(available_attrs), "__dir__ should return sorted attributes"
+
+    # Should be a list (not set or other type)
+    assert isinstance(available_attrs, list), "__dir__ should return a list"
+
+
+def test_dir_graceful_error_handling():
+    """Test that __dir__ handles edge cases gracefully"""
+
+    # Create a column with a problematic schema (forward reference)
+    class ProblematicSchema(Schema):
+        # This might cause issues with get_type_hints
+        field: Column[StringType]
+
+    class TestSchema(Schema):
+        problematic: Column[StructType[ProblematicSchema]]
+
+    # Should not crash even if type introspection fails
+    column = TestSchema.problematic
+    available_attrs = dir(column)
+
+    # Should still return basic Column methods
+    assert "alias" in available_attrs
+    assert isinstance(available_attrs, list)

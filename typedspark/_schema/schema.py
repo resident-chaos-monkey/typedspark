@@ -50,7 +50,7 @@ class MetaSchema(_ProtocolMeta):  # type: ignore
     def __new__(cls, name: str, bases: Any, dct: Dict[str, Any]):
         cls._attributes = dir(cls)
 
-        # initializes all uninitialied variables with a type annotation as None
+        # initialises all uninitialised variables with a type annotation as None
         # this allows for auto-complete in Databricks notebooks (uninitialized variables
         # don't show up in auto-complete there).
         if "__annotations__" in dct.keys():
@@ -69,7 +69,7 @@ class MetaSchema(_ProtocolMeta):  # type: ignore
         """Python base function that gets attributes.
 
         We listen here for anyone getting a ``Column`` from the ``Schema``.
-        Even though they're not explicitely instantiated, we can instantiate
+        Even though they're not explicitly instantiated, we can instantiate
         them here whenever someone attempts to get them. This allows us to do the following:
 
         .. code-block:: python
@@ -205,7 +205,7 @@ class MetaSchema(_ProtocolMeta):  # type: ignore
 
 class Schema(Protocol, metaclass=MetaSchema):
     # pylint: disable=empty-docstring
-    # Since docstrings are inherrited, and since we use docstrings to
+    # Since docstrings are inherited, and since we use docstrings to
     # annotate tables (see MetaSchema.get_dlt_kwargs()), we have chosen
     # to add an empty docstring to the Schema class (otherwise the Schema
     # docstring would be added to any schema without a docstring).
